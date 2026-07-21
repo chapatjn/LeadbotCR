@@ -189,6 +189,10 @@ export async function POST(req: NextRequest) {
             });
           } catch (perBusinessErr: any) {
             summary.errors++;
+            // Also logged server-side (visible in the terminal running the
+            // dev server, or in Vercel's function logs) since the client
+            // only gets the message string, not the full stack trace.
+            console.error(`[scan] Error al procesar "${place.name}":`, perBusinessErr);
             send({
               type: 'error',
               message: `Error al procesar "${place.name}": ${perBusinessErr?.message ?? 'error desconocido'}`,
@@ -210,6 +214,7 @@ export async function POST(req: NextRequest) {
 
         send({ type: 'done', summary });
       } catch (err: any) {
+        console.error('[scan] Error fatal durante el escaneo:', err);
         send({ type: 'fatal', message: err?.message ?? 'Error inesperado durante el escaneo.' });
       } finally {
         controller.close();

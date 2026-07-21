@@ -1,13 +1,11 @@
 import { Resend } from 'resend';
+import { requireEnv } from './env';
 
 let cachedClient: Resend | null = null;
 
 function getClient(): Resend {
   if (cachedClient) return cachedClient;
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta la variable de entorno RESEND_API_KEY.');
-  }
+  const apiKey = requireEnv('RESEND_API_KEY');
   cachedClient = new Resend(apiKey);
   return cachedClient;
 }
@@ -20,10 +18,7 @@ export interface SendEmailInput {
 
 export async function sendColdEmail(input: SendEmailInput) {
   const resend = getClient();
-  const from = process.env.FROM_EMAIL;
-  if (!from) {
-    throw new Error('Falta la variable de entorno FROM_EMAIL.');
-  }
+  const from = requireEnv('FROM_EMAIL');
 
   const html = input.body
     .split('\n')

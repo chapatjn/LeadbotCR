@@ -3,6 +3,8 @@
 // as GOOGLE_PLACES_API_KEY, but kept as its own env var per spec so it can
 // be pointed at a different project/quota independently if needed.
 
+import { requireEnv } from './env';
+
 const PSI_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 
 /**
@@ -21,10 +23,10 @@ const PSI_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
  * observed in testing.
  */
 export async function getMobilePagespeedScore(websiteUrl: string): Promise<number | null> {
-  const apiKey = process.env.PAGESPEED_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta la variable de entorno PAGESPEED_API_KEY.');
-  }
+  // Deliberately outside the try/catch below: a missing key is a
+  // configuration problem that should surface loudly, not get silently
+  // swallowed into a "null score" like a slow/broken website would.
+  const apiKey = requireEnv('PAGESPEED_API_KEY');
 
   const url = new URL(PSI_URL);
   url.searchParams.set('url', websiteUrl);

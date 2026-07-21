@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { requireEnv } from './env';
 
 // Per product spec. Overridable via ANTHROPIC_MODEL if this id ever needs to
 // change — double check this against the current Anthropic model list before
@@ -9,10 +10,7 @@ let cachedClient: Anthropic | null = null;
 
 function getClient(): Anthropic {
   if (cachedClient) return cachedClient;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta la variable de entorno ANTHROPIC_API_KEY.');
-  }
+  const apiKey = requireEnv('ANTHROPIC_API_KEY');
   cachedClient = new Anthropic({ apiKey });
   return cachedClient;
 }

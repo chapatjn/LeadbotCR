@@ -9,6 +9,8 @@
 // page will remain email-less, which is expected and handled gracefully
 // downstream (logged, not sent).
 
+import { requireEnv } from './env';
+
 const TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 
@@ -24,11 +26,7 @@ export interface PlaceDetails {
 }
 
 function requireApiKey(): string {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta la variable de entorno GOOGLE_PLACES_API_KEY.');
-  }
-  return apiKey;
+  return requireEnv('GOOGLE_PLACES_API_KEY');
 }
 
 function sleep(ms: number) {
