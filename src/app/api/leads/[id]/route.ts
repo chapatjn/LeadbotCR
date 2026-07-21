@@ -34,3 +34,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: err?.message ?? 'Error al actualizar el lead.' }, { status: 500 });
   }
 }
+
+// Permanently removes a lead document — distinct from "dismiss" (PATCH
+// above), which just changes status and keeps the lead around. This is a
+// hard delete with no undo, so the client is expected to confirm with the
+// user before calling it.
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const db = getDb();
+    const ref = db.collection(LEADS_COLLECTION).doc(params.id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return NextResponse.json({ error: 'Lead no encontrado.' }, { status: 404 });
+    }
+
+    await ref.delete();
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Error al eliminar el lead.' }, { status: 500 });
+  }
+}

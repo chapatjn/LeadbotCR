@@ -1,10 +1,15 @@
 'use client';
 
 import { Mail } from 'lucide-react';
+import { Tooltip } from './Tooltip';
 
 export function EmailCell({ email }: { email: string | null | undefined }) {
   if (!email) {
-    return <span className="text-sm text-zinc-300">—</span>;
+    return (
+      <Tooltip content="No encontramos un correo de contacto visible: ni en la ficha de Google, ni en el sitio web del negocio (si tiene). Sin esto, el correo generado no se puede enviar.">
+        <span className="cursor-help text-sm text-zinc-300">—</span>
+      </Tooltip>
+    );
   }
 
   return (

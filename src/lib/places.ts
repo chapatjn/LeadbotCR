@@ -25,6 +25,11 @@ export interface PlaceDetails {
   phone: string | null;
 }
 
+export interface PlaceWithDetails {
+  place: PlaceSearchResult;
+  details: PlaceDetails;
+}
+
 function requireApiKey(): string {
   return requireEnv('GOOGLE_PLACES_API_KEY');
 }
@@ -41,6 +46,27 @@ function mapResults(results: any[]): PlaceSearchResult[] {
       name: r.name as string,
       address: (r.formatted_address as string) ?? '',
     }));
+}
+
+function buildQuery(category: string, city: string | null): string {
+  return city ? `${category} en ${city}, Costa Rica` : `${category} in Costa Rica`;
+}
+
+async function fetchFirstPage(query: string, apiKey: string): Promise<any> {
+  const url = new URL(TEXT_SEARCH_URL);
+  url.searchParams.set('query', query);
+  url.searchParams.set('region', 'cr');
+  url.searchParams.set('key', apiKey);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Google Places Text Search respondió ${res.status}`);
+  const data = await res.json();
+
+  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+    throw new Error(`Google Places error: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`);
+  }
+
+  return data;
 }
 
 /**
@@ -79,31 +105,14 @@ export async function searchPlaces(
   maxResults: number
 ): Promise<PlaceSearchResult[]> {
   const apiKey = requireApiKey();
-  const query = city ? `${category} en ${city}, Costa Rica` : `${category} in Costa Rica`;
+  const query = buildQuery(category, city);
 
   const collected: PlaceSearchResult[] = [];
   let pageToken: string | undefined;
   let pageCount = 0;
 
   do {
-    let data: any;
-
-    if (pageToken) {
-      data = await fetchPageWithToken(pageToken, apiKey);
-    } else {
-      const url = new URL(TEXT_SEARCH_URL);
-      url.searchParams.set('query', query);
-      url.searchParams.set('region', 'cr');
-      url.searchParams.set('key', apiKey);
-
-      const res = await fetch(url.toString());
-      if (!res.ok) throw new Error(`Google Places Text Search respondió ${res.status}`);
-      data = await res.json();
-
-      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        throw new Error(`Google Places error: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`);
-      }
-    }
+    const data = pageToken ? await fetchPageWithToken(pageToken, apiKey) : await fetchFirstPage(query, apiKey);
 
     collected.push(...mapResults(data.results ?? []));
     pageToken = data.next_page_token;
@@ -111,6 +120,52 @@ export async function searchPlaces(
   } while (pageToken && collected.length < maxResults && pageCount < 3);
 
   return collected.slice(0, maxResults);
+}
+
+/**
+ * Like searchPlaces, but only keeps businesses that have NO website listed
+ * on Google — checking that requires a Place Details call per candidate, so
+ * this fetches details for every business it encounters and filters as it
+ * goes, pulling additional pages (up to the same 3-page/~60-result Google
+ * cap) until it has `maxResults` qualifying businesses or runs out of
+ * pages. Returns each accepted business along with the details already
+ * fetched for it, so callers don't need to look them up again.
+ */
+export async function searchPlacesWithoutWebsite(
+  category: string,
+  city: string | null,
+  maxResults: number,
+  onProgress?: (checked: number, accepted: number) => void
+): Promise<PlaceWithDetails[]> {
+  const apiKey = requireApiKey();
+  const query = buildQuery(category, city);
+
+  const accepted: PlaceWithDetails[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+  let checked = 0;
+
+  do {
+    const data = pageToken ? await fetchPageWithToken(pageToken, apiKey) : await fetchFirstPage(query, apiKey);
+    const pagePlaces = mapResults(data.results ?? []);
+
+    const pageDetails = await Promise.all(pagePlaces.map((p) => getPlaceDetails(p.placeId)));
+
+    for (let i = 0; i < pagePlaces.length; i++) {
+      checked++;
+      if (!pageDetails[i].website) {
+        accepted.push({ place: pagePlaces[i], details: pageDetails[i] });
+      }
+      if (accepted.length >= maxResults) break;
+    }
+
+    onProgress?.(checked, accepted.length);
+
+    pageToken = data.next_page_token;
+    pageCount++;
+  } while (pageToken && accepted.length < maxResults && pageCount < 3);
+
+  return accepted.slice(0, maxResults);
 }
 
 export async function getPlaceDetails(placeId: string): Promise<PlaceDetails> {

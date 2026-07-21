@@ -2,10 +2,15 @@
 
 import { Phone } from 'lucide-react';
 import { phoneHref } from '@/lib/format';
+import { Tooltip } from './Tooltip';
 
 export function PhoneCell({ phone }: { phone: string | null | undefined }) {
   if (!phone) {
-    return <span className="text-sm text-zinc-300">—</span>;
+    return (
+      <Tooltip content="Google no tiene un número de teléfono registrado para este negocio.">
+        <span className="cursor-help text-sm text-zinc-300">—</span>
+      </Tooltip>
+    );
   }
 
   const href = phoneHref(phone);

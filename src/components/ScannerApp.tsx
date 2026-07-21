@@ -26,6 +26,7 @@ export function ScannerApp() {
   const [useCustomCategory, setUseCustomCategory] = useState(false);
   const [city, setCity] = useState<string>(CR_CITIES[0]);
   const [resultsCount, setResultsCount] = useState<number>(DEFAULT_RESULT_COUNT);
+  const [onlyNoWebsite, setOnlyNoWebsite] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [leads, setLeads] = useState<LeadWithId[]>([]);
@@ -53,7 +54,7 @@ export function ScannerApp() {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: effectiveCategory, city, maxResults: resultsCount }),
+        body: JSON.stringify({ category: effectiveCategory, city, maxResults: resultsCount, onlyNoWebsite }),
       });
 
       if (!res.body) {
@@ -244,6 +245,23 @@ export function ScannerApp() {
                     </select>
                   </div>
                 </div>
+
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-xs text-white/80">
+                  <input
+                    type="checkbox"
+                    checked={onlyNoWebsite}
+                    onChange={(e) => setOnlyNoWebsite(e.target.checked)}
+                    disabled={isScanning}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-white/30 bg-white/10 accent-violet-500"
+                  />
+                  <span>
+                    Solo negocios sin sitio web
+                    <span className="mt-0.5 block text-[11px] font-light text-white/50">
+                      Ignora los que ya tienen sitio y busca más páginas de resultados si hace falta para completar
+                      la cantidad pedida.
+                    </span>
+                  </span>
+                </label>
               </div>
 
         <button

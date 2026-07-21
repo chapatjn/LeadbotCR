@@ -1,6 +1,12 @@
 import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
-import { searchPlaces, getPlaceDetails, type PlaceSearchResult } from '@/lib/places';
+import {
+  getPlaceDetails,
+  searchPlaces,
+  searchPlacesWithoutWebsite,
+  type PlaceDetails,
+  type PlaceSearchResult,
+} from '@/lib/places';
 import { getMobilePagespeedScore } from '@/lib/pagespeed';
 import { checkDesignSignals } from '@/lib/design-check';
 import { scoreLead } from '@/lib/scoring';
@@ -45,15 +51,25 @@ async function runPool<T>(items: T[], concurrency: number, worker: (item: T, ind
   await Promise.all(workers);
 }
 
+interface WorkItem {
+  place: PlaceSearchResult;
+  // Pre-fetched only when using "only businesses without a website" mode,
+  // since that mode already needs Place Details to filter — no point
+  // fetching them again in processBusiness.
+  details?: PlaceDetails;
+}
+
 export async function POST(req: NextRequest) {
   let category: string;
   let cityInput: string;
   let maxResults: number;
+  let onlyNoWebsite: boolean;
 
   try {
     const body = await req.json();
     category = (body?.category ?? '').toString().trim();
     cityInput = (body?.city ?? '').toString().trim();
+    onlyNoWebsite = body?.onlyNoWebsite === true;
 
     const requestedResults = Number(body?.maxResults);
     maxResults = RESULT_COUNT_OPTIONS.includes(requestedResults as any)
@@ -83,33 +99,56 @@ export async function POST(req: NextRequest) {
       const summary: ScanSummary = { total: 0, pendingReview: 0, notQualified: 0, errors: 0 };
 
       try {
+        const locationText = isAllCostaRica ? 'todo Costa Rica' : `${displayCity}, Costa Rica`;
         send({
           type: 'status',
-          message: isAllCostaRica
-            ? `Buscando "${category}" en todo Costa Rica...`
-            : `Buscando "${category}" en ${displayCity}, Costa Rica...`,
+          message: onlyNoWebsite
+            ? `Buscando "${category}" en ${locationText} — solo negocios sin sitio web...`
+            : `Buscando "${category}" en ${locationText}...`,
         });
 
-        const places = await searchPlaces(category, searchCity, maxResults);
-        summary.total = places.length;
+        let workItems: WorkItem[];
 
-        if (places.length === 0) {
-          send({ type: 'status', message: 'No se encontraron negocios para esa búsqueda.' });
+        if (onlyNoWebsite) {
+          const found = await searchPlacesWithoutWebsite(category, searchCity, maxResults, (checked, accepted) => {
+            send({
+              type: 'status',
+              message: `Revisando negocios... ${checked} revisados, ${accepted} sin sitio web encontrados hasta ahora.`,
+            });
+          });
+          workItems = found.map((f) => ({ place: f.place, details: f.details }));
+        } else {
+          const places = await searchPlaces(category, searchCity, maxResults);
+          workItems = places.map((place) => ({ place }));
+        }
+
+        summary.total = workItems.length;
+
+        if (workItems.length === 0) {
+          send({
+            type: 'status',
+            message: onlyNoWebsite
+              ? 'No se encontraron negocios sin sitio web para esa búsqueda.'
+              : 'No se encontraron negocios para esa búsqueda.',
+          });
           send({ type: 'done', summary });
           controller.close();
           return;
         }
 
-        send({ type: 'status', message: `Se encontraron ${places.length} negocios. Analizando (hasta ${CONCURRENCY} a la vez)...` });
+        send({
+          type: 'status',
+          message: `Se encontraron ${workItems.length} negocios. Analizando (hasta ${CONCURRENCY} a la vez)...`,
+        });
 
         const db = getDb();
         let completed = 0;
 
-        const processBusiness = async (place: PlaceSearchResult) => {
+        const processBusiness = async ({ place, details: prefetchedDetails }: WorkItem) => {
           send({ type: 'status', message: `Analizando "${place.name}"...` });
 
           try {
-            const details = await getPlaceDetails(place.placeId);
+            const details = prefetchedDetails ?? (await getPlaceDetails(place.placeId));
             const hasWebsite = !!details.website;
 
             let pagespeedScore: number | null = null;
@@ -204,13 +243,13 @@ export async function POST(req: NextRequest) {
             send({
               type: 'progress',
               index: completed,
-              total: places.length,
-              message: `(${completed}/${places.length}) completados`,
+              total: workItems.length,
+              message: `(${completed}/${workItems.length}) completados`,
             });
           }
         };
 
-        await runPool(places, CONCURRENCY, processBusiness);
+        await runPool(workItems, CONCURRENCY, processBusiness);
 
         send({ type: 'done', summary });
       } catch (err: any) {
