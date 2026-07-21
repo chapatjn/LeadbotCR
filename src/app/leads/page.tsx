@@ -31,8 +31,8 @@ export default async function LeadsPage() {
       <div>
         <h1 className="text-xl font-semibold mb-1">Revisión de leads</h1>
         <p className="text-sm text-black/60">
-          Leads de puntaje medio quedan aquí para aprobación manual antes de enviarse. Los de puntaje alto se
-          envían automáticamente durante el escaneo.
+          Todo lead calificado queda aquí para aprobación manual — no se envía ningún correo automáticamente
+          durante el escaneo, sin importar el puntaje.
         </p>
       </div>
 

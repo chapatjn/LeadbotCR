@@ -14,14 +14,19 @@ Encuentra negocios costarricenses con poca presencia web y envíales una propues
 
 ## Cómo funciona
 
-1. **`/`** — Escáner: elige categoría de negocio y ciudad, y dispara el pipeline.
-2. **`POST /api/scan`** — busca negocios en Google Places, evalúa cada uno, genera el
-   correo con Claude cuando corresponde, envía por Resend si califica, y guarda todo
-   en Firestore. Responde con un stream NDJSON de eventos de progreso que la UI
-   consume en tiempo real (sin polling).
+1. **`/`** — Escáner: elige categoría de negocio, ubicación (una ciudad específica o
+   "Todo Costa Rica") y cuántos resultados traer (5/10/20/50), y dispara el pipeline.
+2. **`POST /api/scan`** — busca negocios en Google Places (paginando con
+   `next_page_token` si se piden más de 20), evalúa cada uno, y genera el correo con
+   Claude para todo lead calificado (puntaje medio o alto). **No envía nada
+   automáticamente** — todo lead calificado se guarda en Firestore como
+   `pending_review`, sin importar el tier. Responde con un stream NDJSON de eventos de
+   progreso que la UI consume en tiempo real (sin polling).
 3. **`/leads`** — cola de revisión: lista todos los leads guardados, con filtros por
-   estado. Los leads de puntaje medio (`pending_review`) se pueden aprobar y enviar
-   manualmente desde ahí, o descartar.
+   estado. Cada lead `pending_review` con un correo de contacto detectado tiene un
+   botón "Enviar correo" que abre el modal de detalle para revisar el copy antes de
+   confirmar el envío real vía `POST /api/send-email`. También se puede descartar
+   (`dismissed`) sin enviar.
 
 ## Motor de puntaje (0-100)
 
@@ -34,21 +39,20 @@ Encuentra negocios costarricenses con poca presencia web y envíales una propues
 Si no hay sitio web, se omiten las verificaciones de PageSpeed y diseño (no hay nada
 que revisar), y el lead queda marcado con un flag manual.
 
-- **Alto (70-100):** correo generado y enviado automáticamente.
-- **Medio (40-69):** correo generado, guardado como `pending_review`, **no** se envía
-  hasta aprobación manual en `/leads`.
-- **Bajo (0-39):** se omite, se guarda como `not_qualified`.
+- **Alto (70-100)** y **Medio (40-69):** ambos se tratan igual para efectos de envío
+  — se genera el correo y el lead queda como `pending_review`, esperando aprobación
+  manual en `/leads`. El tier solo se usa como señal de prioridad (el badge de
+  puntaje y la estadística "Puntaje alto"), **no** determina si se envía
+  automáticamente — no hay envío automático en ningún tier.
+- **Bajo (0-39):** se omite, se guarda como `not_qualified`, sin generar correo.
 
 > **Nota sobre el puntaje:** tal como está especificado, la rama "sin sitio web" se
 > queda en 50 puntos (las otras dos verificaciones se omiten explícitamente), y la
-> rama "con sitio web" suma como máximo 30+20=50. Es decir, con las reglas literales
-> ningún lead puede matemáticamente alcanzar el rango "Alto" (70-100) — el máximo
-> real es 50, así que todo cae en "Medio" en el peor/mejor de los casos. Esto está
-> implementado tal cual se pidió (ver `src/lib/scoring.ts`), pero si quieres que el
-> tier "Alto" (envío automático) sea alcanzable, la forma más simple es sumar los 20
-> puntos de "diseño desactualizado" también a los leads sin sitio web (un negocio sin
-> sitio, por definición, no tiene un diseño "moderno"), lo cual los llevaría a 70.
-> Es un cambio de una línea en `scoreLead()`.
+> rama "con sitio web" suma como máximo 30+20=50. El máximo real es 50, así que
+> ningún lead alcanza matemáticamente el rango "Alto" (70-100) salvo que ajustes la
+> fórmula — esto ya no afecta el envío (que ahora es 100% manual para cualquier
+> tier), pero sigue siendo relevante para el badge de puntaje y las estadísticas. Ver
+> `src/lib/scoring.ts` para el detalle.
 
 ## Sobre los correos electrónicos de los negocios
 
@@ -58,8 +62,8 @@ muerto para negocios que sí tienen sitio web, cuando se revisan las señales de
 también se rastrea el HTML de la página en busca de un enlace `mailto:` o un patrón
 de correo visible, y ese correo (si aparece) se usa como destinatario. Negocios sin
 sitio web, o con sitio pero sin correo visible en el HTML, quedarán sin correo — el
-sistema lo maneja sin fallar: se registra el lead igual, solo que no se envía nada
-(estado `no_email`).
+sistema lo maneja sin fallar: se registra el lead igual (`pending_review`), solo que
+en `/leads` no aparece el botón de enviar (se muestra "Sin correo" en su lugar).
 
 ## Variables de entorno
 

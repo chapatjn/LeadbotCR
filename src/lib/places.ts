@@ -31,28 +31,11 @@ function requireApiKey(): string {
   return apiKey;
 }
 
-export async function searchPlaces(category: string, city: string): Promise<PlaceSearchResult[]> {
-  const apiKey = requireApiKey();
-  const query = `${category} en ${city}, Costa Rica`;
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  const url = new URL(TEXT_SEARCH_URL);
-  url.searchParams.set('query', query);
-  url.searchParams.set('region', 'cr');
-  url.searchParams.set('key', apiKey);
-
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    throw new Error(`Google Places Text Search respondió ${res.status}`);
-  }
-
-  const data = await res.json();
-
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-    throw new Error(`Google Places error: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`);
-  }
-
-  const results = (data.results ?? []) as any[];
-
+function mapResults(results: any[]): PlaceSearchResult[] {
   return results
     .filter((r) => r.place_id && r.name)
     .map((r) => ({
@@ -60,6 +43,76 @@ export async function searchPlaces(category: string, city: string): Promise<Plac
       name: r.name as string,
       address: (r.formatted_address as string) ?? '',
     }));
+}
+
+/**
+ * Text Search only returns up to 20 results per request. Getting more
+ * requires re-issuing the request with a `pagetoken`, and Google's docs
+ * note the token can take a few seconds to become valid — an immediate
+ * retry commonly comes back INVALID_REQUEST, so we back off and retry a
+ * couple of times before giving up on that page.
+ */
+async function fetchPageWithToken(pageToken: string, apiKey: string): Promise<any> {
+  const url = new URL(TEXT_SEARCH_URL);
+  url.searchParams.set('pagetoken', pageToken);
+  url.searchParams.set('key', apiKey);
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await sleep(1500);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`Google Places Text Search respondió ${res.status}`);
+    const data = await res.json();
+    if (data.status === 'INVALID_REQUEST') continue; // token not ready yet — retry
+    return data;
+  }
+
+  // Token never became valid in time — treat as "no more pages" rather than failing the whole scan.
+  return { status: 'ZERO_RESULTS', results: [] };
+}
+
+/**
+ * city === null means an all-Costa-Rica search (no city filter). Paginates
+ * through Places Text Search (via next_page_token) until maxResults is
+ * reached or Google runs out of pages (capped at 3 pages / ~60 results).
+ */
+export async function searchPlaces(
+  category: string,
+  city: string | null,
+  maxResults: number
+): Promise<PlaceSearchResult[]> {
+  const apiKey = requireApiKey();
+  const query = city ? `${category} en ${city}, Costa Rica` : `${category} in Costa Rica`;
+
+  const collected: PlaceSearchResult[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+
+  do {
+    let data: any;
+
+    if (pageToken) {
+      data = await fetchPageWithToken(pageToken, apiKey);
+    } else {
+      const url = new URL(TEXT_SEARCH_URL);
+      url.searchParams.set('query', query);
+      url.searchParams.set('region', 'cr');
+      url.searchParams.set('key', apiKey);
+
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error(`Google Places Text Search respondió ${res.status}`);
+      data = await res.json();
+
+      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+        throw new Error(`Google Places error: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`);
+      }
+    }
+
+    collected.push(...mapResults(data.results ?? []));
+    pageToken = data.next_page_token;
+    pageCount++;
+  } while (pageToken && collected.length < maxResults && pageCount < 3);
+
+  return collected.slice(0, maxResults);
 }
 
 export async function getPlaceDetails(placeId: string): Promise<PlaceDetails> {

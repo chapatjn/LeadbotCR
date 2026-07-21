@@ -5,17 +5,17 @@ import { getDb, LEADS_COLLECTION } from '@/lib/firebase-admin';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Lets a reviewer dismiss a pending_review lead without sending it (e.g. not
-// a good fit after all). Only allows narrowing to a small set of manual,
-// non-sending status transitions — actually sending lives in ./send/route.ts.
+// The only manual, non-sending status transition a reviewer can make:
+// dismiss a pending_review lead they don't want to pursue. Actual sending
+// lives in /api/send-email — this route never sends anything.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json();
     const status = body?.status;
 
-    if (status !== 'not_qualified' && status !== 'pending_review') {
+    if (status !== 'dismissed') {
       return NextResponse.json(
-        { error: 'status inválido. Usa el endpoint /send para marcar un lead como enviado.' },
+        { error: 'status inválido. Solo se puede descartar (dismissed) un lead desde este endpoint.' },
         { status: 400 }
       );
     }

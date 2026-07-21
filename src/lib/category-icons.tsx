@@ -1,5 +1,6 @@
 import {
   Building2,
+  Calculator,
   Coffee,
   Croissant,
   Dumbbell,
@@ -9,6 +10,7 @@ import {
   Scale,
   Scissors,
   Shirt,
+  ShoppingCart,
   Sparkles,
   Stethoscope,
   UtensilsCrossed,
@@ -40,6 +42,9 @@ const CATEGORY_ICON_ENTRIES: [string, LucideIcon][] = [
   ['cafeteria', Coffee],
   ['panaderia', Croissant],
   ['spa', Sparkles],
+  ['supermercado', ShoppingCart],
+  ['contador', Calculator],
+  ['contabilidad', Calculator],
 ];
 
 const DIACRITICS_PATTERN = new RegExp('[̀-ͯ]', 'g');

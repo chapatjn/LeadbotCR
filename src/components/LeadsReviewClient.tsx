@@ -2,33 +2,22 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import {
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
-  ArrowUpDown,
-  Eye,
-  MapPin,
-  Search,
-  Send,
-} from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, CircleCheck, Search, Send } from 'lucide-react';
 import type { LeadStatus, LeadWithId } from '@/lib/types';
-import { buildMapsUrl } from '@/lib/maps';
 import { CategoryBadge } from './CategoryBadge';
+import { EmailCell } from './EmailCell';
 import { LeadDetailModal } from './LeadDetailModal';
 import { MapsLink } from './MapsLink';
 import { PhoneCell } from './PhoneCell';
 import { ScoreBadge } from './ScoreBadge';
 import { StatsBar } from './StatsBar';
-import { StatusBadge } from './StatusBadge';
 import { WhyChips } from './WhyChips';
 
 const FILTERS: { key: 'all' | LeadStatus; label: string }[] = [
   { key: 'all', label: 'Todos' },
   { key: 'pending_review', label: 'Pendientes de revisión' },
   { key: 'sent', label: 'Enviados' },
-  { key: 'no_email', label: 'Sin correo' },
-  { key: 'send_failed', label: 'Falló el envío' },
+  { key: 'dismissed', label: 'Descartados' },
   { key: 'not_qualified', label: 'No calificados' },
 ];
 
@@ -82,7 +71,11 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
     setBusyId(lead.id);
     setErrorById((prev) => ({ ...prev, [lead.id]: '' }));
     try {
-      const res = await fetch(`/api/leads/${lead.id}/send`, { method: 'POST' });
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: lead.id }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? 'Error al enviar.');
 
@@ -103,12 +96,12 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'not_qualified' }),
+        body: JSON.stringify({ status: 'dismissed' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? 'Error al descartar.');
 
-      setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status: 'not_qualified' } : l)));
+      setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status: 'dismissed' } : l)));
     } catch (err: any) {
       setErrorById((prev) => ({ ...prev, [lead.id]: err?.message ?? 'Error al descartar.' }));
     } finally {
@@ -192,10 +185,10 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
                     <th className="px-4 py-3 font-medium">Categoría</th>
                     <th className="px-4 py-3 font-medium">Ubicación</th>
                     <th className="px-4 py-3 font-medium">Teléfono</th>
+                    <th className="px-4 py-3 font-medium">Correo encontrado</th>
                     <th className="px-4 py-3 font-medium">Por qué lo contactamos</th>
                     <SortableTh label="Puntaje" field="score" sortField={sortField} sortDir={sortDir} onSort={setSort} />
-                    <SortableTh label="Estado" field="status" sortField={sortField} sortDir={sortDir} onSort={setSort} />
-                    <th className="px-4 py-3 font-medium text-right">Acciones</th>
+                    <th className="px-4 py-3 font-medium">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -229,6 +222,9 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
                       <td className="px-4 py-3">
                         <PhoneCell phone={lead.phone} />
                       </td>
+                      <td className="px-4 py-3">
+                        <EmailCell email={lead.email} />
+                      </td>
                       <td className="px-4 py-3 max-w-xs">
                         <WhyChips lead={lead} />
                       </td>
@@ -236,57 +232,11 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
                         <ScoreBadge score={lead.score} tier={lead.tier} />
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={lead.status} />
-                          {lead.status === 'pending_review' && lead.email && (
-                            <button
-                              type="button"
-                              disabled={busyId === lead.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSend(lead);
-                              }}
-                              className="rounded-md bg-cr-blue px-2 py-1 text-[11px] font-semibold text-white hover:bg-cr-blue/90 disabled:opacity-40 transition-colors"
-                            >
-                              {busyId === lead.id ? '...' : 'Enviar'}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <IconButton
-                            label="Ver correo"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedLeadId(lead.id);
-                            }}
-                          >
-                            <Eye className="h-3.5 w-3.5" strokeWidth={2} />
-                          </IconButton>
-                          {lead.status === 'pending_review' && lead.email && (
-                            <IconButton
-                              label="Enviar ahora"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSend(lead);
-                              }}
-                            >
-                              <Send className="h-3.5 w-3.5" strokeWidth={2} />
-                            </IconButton>
-                          )}
-                          <a
-                            href={buildMapsUrl({ name: lead.name, city: lead.city, placeId: lead.placeId })}
-                            target="_blank"
-                            rel="noreferrer"
-                            title="Abrir en Maps"
-                            aria-label="Abrir en Maps"
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded-lg p-1.5 text-black/40 hover:bg-black/5 hover:text-black/70 transition-colors"
-                          >
-                            <MapPin className="h-3.5 w-3.5" strokeWidth={2} />
-                          </a>
-                        </div>
+                        <ActionCell
+                          lead={lead}
+                          busy={busyId === lead.id}
+                          onOpenModal={() => setSelectedLeadId(lead.id)}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -313,50 +263,12 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
                   <ScoreBadge score={lead.score} tier={lead.tier} />
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <MapsLink name={lead.name} city={lead.city} placeId={lead.placeId} />
-                  <PhoneCell phone={lead.phone} />
-                </div>
-
-                <div className="mt-3">
-                  <WhyChips lead={lead} />
-                </div>
-
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <StatusBadge status={lead.status} />
-                  <div className="flex items-center gap-1">
-                    <IconButton
-                      label="Ver correo"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedLeadId(lead.id);
-                      }}
-                    >
-                      <Eye className="h-3.5 w-3.5" strokeWidth={2} />
-                    </IconButton>
-                    {lead.status === 'pending_review' && lead.email && (
-                      <IconButton
-                        label="Enviar ahora"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSend(lead);
-                        }}
-                      >
-                        <Send className="h-3.5 w-3.5" strokeWidth={2} />
-                      </IconButton>
-                    )}
-                    <a
-                      href={buildMapsUrl({ name: lead.name, city: lead.city, placeId: lead.placeId })}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Abrir en Maps"
-                      aria-label="Abrir en Maps"
-                      onClick={(e) => e.stopPropagation()}
-                      className="rounded-lg p-1.5 text-black/40 hover:bg-black/5 hover:text-black/70 transition-colors"
-                    >
-                      <MapPin className="h-3.5 w-3.5" strokeWidth={2} />
-                    </a>
-                  </div>
+                  <ActionCell
+                    lead={lead}
+                    busy={busyId === lead.id}
+                    onOpenModal={() => setSelectedLeadId(lead.id)}
+                  />
                 </div>
                 {errorById[lead.id] && <p className="mt-2 text-xs text-red-600">{errorById[lead.id]}</p>}
               </li>
@@ -374,6 +286,53 @@ export function LeadsReviewClient({ initialLeads }: { initialLeads: LeadWithId[]
         error={selectedLead ? errorById[selectedLead.id] : undefined}
       />
     </div>
+  );
+}
+
+function ActionCell({
+  lead,
+  busy,
+  onOpenModal,
+}: {
+  lead: LeadWithId;
+  busy: boolean;
+  onOpenModal: () => void;
+}) {
+  if (lead.status === 'sent') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+        <CircleCheck className="h-3.5 w-3.5" strokeWidth={2} />
+        Enviado
+      </span>
+    );
+  }
+
+  if (lead.status === 'dismissed') {
+    return <span className="text-xs font-medium text-zinc-400">Descartado</span>;
+  }
+
+  if (lead.status === 'not_qualified') {
+    return <span className="text-xs text-zinc-300">—</span>;
+  }
+
+  // pending_review
+  if (!lead.email) {
+    return <span className="text-xs font-medium text-zinc-400">Sin correo</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenModal();
+      }}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-cr-blue px-3 py-1.5 text-xs font-semibold text-white hover:bg-cr-blue/90 disabled:opacity-40 transition-colors"
+    >
+      <Send className="h-3.5 w-3.5" strokeWidth={2} />
+      Enviar correo
+    </button>
   );
 }
 
@@ -409,28 +368,6 @@ function SortableTh({
   );
 }
 
-function IconButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: (e: React.MouseEvent) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="rounded-lg p-1.5 text-black/40 hover:bg-black/5 hover:text-black/70 transition-colors"
-    >
-      {children}
-    </button>
-  );
-}
-
 function EmptyState() {
   return (
     <div className="rounded-xl border border-dashed border-black/15 bg-white py-16 text-center">
@@ -439,7 +376,7 @@ function EmptyState() {
       </div>
       <p className="mt-4 text-sm font-medium text-black/70">Todavía no hay leads escaneados.</p>
       <p className="mx-auto mt-1 max-w-sm text-sm text-black/45">
-        Elige una categoría de negocio y una ciudad para empezar tu primer escaneo.
+        Ejecuta un escaneo para encontrar negocios.
       </p>
       <Link
         href="/"

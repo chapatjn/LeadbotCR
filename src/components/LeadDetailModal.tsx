@@ -114,7 +114,7 @@ export function LeadDetailModal({ lead, onClose, onSend, onDismiss, busy, error 
 
   const Icon = getCategoryIcon(lead.category);
   const breakdown = buildBreakdown(lead);
-  const canSend = (lead.status === 'pending_review' || lead.status === 'no_email' || lead.status === 'send_failed') && !!lead.email;
+  const canSend = lead.status === 'pending_review' && !!lead.email;
   const tel = phoneHref(lead.phone);
   const mapsUrl = buildMapsUrl({ name: lead.name, city: lead.city, placeId: lead.placeId });
 
@@ -244,16 +244,28 @@ export function LeadDetailModal({ lead, onClose, onSend, onDismiss, busy, error 
             <p className="text-sm text-emerald-700">Enviado el {formatScannedAt(lead.sentAt)}.</p>
           )}
 
-          {canSend && (
+          {lead.status === 'dismissed' && (
+            <p className="text-sm text-black/50">Este lead fue descartado. No se enviará ningún correo.</p>
+          )}
+
+          {lead.status === 'pending_review' && !lead.email && (
+            <p className="text-sm text-black/50">
+              No se encontró un correo de contacto para este negocio, así que no se puede enviar.
+            </p>
+          )}
+
+          {lead.status === 'pending_review' && (
             <div className="flex flex-wrap items-center gap-3 border-t border-black/10 pt-4">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onSend(lead)}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {busy ? 'Enviando...' : lead.status === 'send_failed' ? 'Reintentar envío' : 'Enviar correo'}
-              </button>
+              {canSend && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onSend(lead)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {busy ? 'Enviando...' : 'Enviar ahora'}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={busy}

@@ -1,11 +1,10 @@
 export type Tier = 'high' | 'medium' | 'low';
 
 export type LeadStatus =
-  | 'sent' // high tier, email sent automatically
-  | 'send_failed' // high tier, had an email but Resend send failed
-  | 'no_email' // high/medium tier but no email address was found, logged only
-  | 'pending_review' // medium tier, email generated, waiting for manual approval
-  | 'not_qualified'; // low tier, skipped
+  | 'pending_review' // qualified (medium/high tier), email generated, awaiting manual send
+  | 'sent' // manually approved and sent via Resend
+  | 'dismissed' // manually reviewed and rejected — no send
+  | 'not_qualified'; // low tier, skipped entirely, no email generated
 
 export interface Weakness {
   code: 'no_website' | 'slow_mobile' | 'outdated_design';
@@ -49,7 +48,6 @@ export interface LeadWithId extends Lead {
 
 export interface ScanSummary {
   total: number;
-  sent: number;
   pendingReview: number;
   notQualified: number;
   errors: number;

@@ -1,7 +1,14 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { CR_CATEGORIES, CR_CITIES } from '@/lib/constants';
+import {
+  ALL_COSTA_RICA,
+  ALL_COSTA_RICA_LABEL,
+  CR_CATEGORIES,
+  CR_CITIES,
+  DEFAULT_RESULT_COUNT,
+  RESULT_COUNT_OPTIONS,
+} from '@/lib/constants';
 import type { LeadWithId, ScanEvent, ScanSummary } from '@/lib/types';
 import { ScoreBadge } from './ScoreBadge';
 import { StatusBadge } from './StatusBadge';
@@ -18,6 +25,7 @@ export function ScannerApp() {
   const [customCategory, setCustomCategory] = useState('');
   const [useCustomCategory, setUseCustomCategory] = useState(false);
   const [city, setCity] = useState<string>(CR_CITIES[0]);
+  const [resultsCount, setResultsCount] = useState<number>(DEFAULT_RESULT_COUNT);
   const [isScanning, setIsScanning] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [leads, setLeads] = useState<LeadWithId[]>([]);
@@ -45,7 +53,7 @@ export function ScannerApp() {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: effectiveCategory, city }),
+        body: JSON.stringify({ category: effectiveCategory, city, maxResults: resultsCount }),
       });
 
       if (!res.body) {
@@ -199,20 +207,42 @@ export function ScannerApp() {
             </button>
                 </div>
 
-                <div>
-            <label className="mb-1.5 block text-xs font-medium text-white/70">Ciudad</label>
-            <select
-              className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-3 text-sm text-white outline-none transition focus:border-white/35 focus:bg-white/15"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              disabled={isScanning}
-            >
-              {CR_CITIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-white/70">Ubicación</label>
+                    <select
+                      className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-3 text-sm text-white outline-none transition focus:border-white/35 focus:bg-white/15"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      disabled={isScanning}
+                    >
+                      <option value={ALL_COSTA_RICA}>{ALL_COSTA_RICA_LABEL}</option>
+                      <option value="" disabled>
+                        ──────────
+                      </option>
+                      {CR_CITIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-white/70">Resultados</label>
+                    <select
+                      className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-3 text-sm text-white outline-none transition focus:border-white/35 focus:bg-white/15"
+                      value={resultsCount}
+                      onChange={(e) => setResultsCount(Number(e.target.value))}
+                      disabled={isScanning}
+                    >
+                      {RESULT_COUNT_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n} negocios
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -271,9 +301,8 @@ export function ScannerApp() {
       )}
 
       {summary && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <SummaryStat label="Total analizado" value={summary.total} />
-          <SummaryStat label="Correos enviados" value={summary.sent} />
           <SummaryStat label="Para revisar" value={summary.pendingReview} />
           <SummaryStat label="No calificados" value={summary.notQualified} />
         </section>

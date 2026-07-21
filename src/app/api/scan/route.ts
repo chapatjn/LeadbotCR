@@ -5,12 +5,11 @@ import { getMobilePagespeedScore } from '@/lib/pagespeed';
 import { checkDesignSignals } from '@/lib/design-check';
 import { scoreLead } from '@/lib/scoring';
 import { generateColdEmail } from '@/lib/claude';
-import { sendColdEmail } from '@/lib/resend';
 import { getDb, LEADS_COLLECTION } from '@/lib/firebase-admin';
-import { MAX_SCAN_RESULTS } from '@/lib/constants';
+import { ALL_COSTA_RICA, DEFAULT_RESULT_COUNT, MAX_ALLOWED_RESULTS, RESULT_COUNT_OPTIONS } from '@/lib/constants';
 import type { Lead, LeadStatus, ScanEvent, ScanSummary } from '@/lib/types';
 
-// This route can take a while: up to MAX_SCAN_RESULTS businesses, each
+// This route can take a while: up to MAX_ALLOWED_RESULTS businesses, each
 // potentially requiring a PageSpeed Insights run (several seconds) plus a
 // Claude call. It streams NDJSON progress events as it goes so the UI can
 // show real-time status instead of blocking on one long request.
@@ -24,19 +23,30 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   let category: string;
-  let city: string;
+  let cityInput: string;
+  let maxResults: number;
 
   try {
     const body = await req.json();
     category = (body?.category ?? '').toString().trim();
-    city = (body?.city ?? '').toString().trim();
+    cityInput = (body?.city ?? '').toString().trim();
+
+    const requestedResults = Number(body?.maxResults);
+    maxResults = RESULT_COUNT_OPTIONS.includes(requestedResults as any)
+      ? requestedResults
+      : DEFAULT_RESULT_COUNT;
+    maxResults = Math.min(maxResults, MAX_ALLOWED_RESULTS);
   } catch {
     return new Response(JSON.stringify({ error: 'Cuerpo de la solicitud inválido.' }), { status: 400 });
   }
 
-  if (!category || !city) {
+  if (!category || !cityInput) {
     return new Response(JSON.stringify({ error: 'category y city son requeridos.' }), { status: 400 });
   }
+
+  const isAllCostaRica = cityInput === ALL_COSTA_RICA;
+  const searchCity = isAllCostaRica ? null : cityInput;
+  const displayCity = isAllCostaRica ? 'Costa Rica' : cityInput;
 
   const encoder = new TextEncoder();
 
@@ -46,34 +56,38 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
       };
 
-      const summary: ScanSummary = { total: 0, sent: 0, pendingReview: 0, notQualified: 0, errors: 0 };
+      const summary: ScanSummary = { total: 0, pendingReview: 0, notQualified: 0, errors: 0 };
 
       try {
-        send({ type: 'status', message: `Buscando "${category}" en ${city}, Costa Rica...` });
+        send({
+          type: 'status',
+          message: isAllCostaRica
+            ? `Buscando "${category}" en todo Costa Rica...`
+            : `Buscando "${category}" en ${displayCity}, Costa Rica...`,
+        });
 
-        const places = await searchPlaces(category, city);
-        const limited = places.slice(0, MAX_SCAN_RESULTS);
-        summary.total = limited.length;
+        const places = await searchPlaces(category, searchCity, maxResults);
+        summary.total = places.length;
 
-        if (limited.length === 0) {
+        if (places.length === 0) {
           send({ type: 'status', message: 'No se encontraron negocios para esa búsqueda.' });
           send({ type: 'done', summary });
           controller.close();
           return;
         }
 
-        send({ type: 'status', message: `Se encontraron ${limited.length} negocios. Analizando uno por uno...` });
+        send({ type: 'status', message: `Se encontraron ${places.length} negocios. Analizando uno por uno...` });
 
         const db = getDb();
 
-        for (let i = 0; i < limited.length; i++) {
-          const place = limited[i];
+        for (let i = 0; i < places.length; i++) {
+          const place = places[i];
 
           send({
             type: 'progress',
             index: i + 1,
-            total: limited.length,
-            message: `(${i + 1}/${limited.length}) Analizando "${place.name}"...`,
+            total: places.length,
+            message: `(${i + 1}/${places.length}) Analizando "${place.name}"...`,
           });
 
           try {
@@ -101,7 +115,6 @@ export async function POST(req: NextRequest) {
             let status: LeadStatus;
             let emailSubject: string | null = null;
             let emailBody: string | null = null;
-            let sentAt: string | null = null;
 
             if (tier === 'low') {
               status = 'not_qualified';
@@ -110,44 +123,24 @@ export async function POST(req: NextRequest) {
               send({ type: 'status', message: `Generando correo personalizado para "${place.name}"...` });
               const generated = await generateColdEmail({
                 businessName: place.name,
-                city,
+                city: displayCity,
                 category,
                 weaknesses: weaknesses.map((w) => w.label),
               });
               emailSubject = generated.subject;
               emailBody = generated.body;
 
-              if (tier === 'high' && extractedEmail) {
-                try {
-                  await sendColdEmail({ to: extractedEmail, subject: emailSubject, body: emailBody });
-                  status = 'sent';
-                  sentAt = new Date().toISOString();
-                  summary.sent++;
-                  send({ type: 'status', message: `Correo enviado a "${place.name}".` });
-                } catch {
-                  status = 'send_failed';
-                  summary.errors++;
-                  send({ type: 'status', message: `No se pudo enviar el correo a "${place.name}".` });
-                }
-              } else if (tier === 'high' && !extractedEmail) {
-                status = 'no_email';
-                summary.pendingReview++;
-                send({
-                  type: 'status',
-                  message: `"${place.name}" calificó como prioritario, pero no se encontró un correo; queda registrado sin enviar.`,
-                });
-              } else {
-                // medium tier: always saved for manual review, never auto-sent
-                status = 'pending_review';
-                summary.pendingReview++;
-              }
+              // No auto-send, regardless of tier — every qualified lead
+              // waits in the review queue for a human to approve it.
+              status = 'pending_review';
+              summary.pendingReview++;
             }
 
             const leadDoc: Lead = {
               placeId: place.placeId,
               name: place.name,
               address: place.address,
-              city,
+              city: displayCity,
               category,
               phone: details.phone,
               website: details.website,
@@ -162,7 +155,7 @@ export async function POST(req: NextRequest) {
               emailBody,
               status,
               scannedAt: new Date().toISOString(),
-              sentAt,
+              sentAt: null,
               createdAt: FieldValue.serverTimestamp(),
               updatedAt: FieldValue.serverTimestamp(),
             };
