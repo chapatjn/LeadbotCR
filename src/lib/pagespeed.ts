@@ -10,6 +10,15 @@ const PSI_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
  * the check could not be completed (invalid URL, PSI error, timeout, etc).
  * A null result is treated as "unknown" and does not contribute points to
  * the scoring engine — it is not the same as a low score.
+ *
+ * Real-world Lighthouse mobile audits routinely take 30-60+ seconds for
+ * actual production sites (a trivial static page returns almost instantly,
+ * but that's not representative). An earlier 30s timeout was silently
+ * discarding the vast majority of real results — every genuinely slow site
+ * (the exact thing this check exists to catch) was timing out before PSI
+ * could finish, so `pagespeedScore` came back null and the "slow load"
+ * scoring signal never fired. 45s covers the large majority of real sites
+ * observed in testing.
  */
 export async function getMobilePagespeedScore(websiteUrl: string): Promise<number | null> {
   const apiKey = process.env.PAGESPEED_API_KEY;
@@ -25,7 +34,7 @@ export async function getMobilePagespeedScore(websiteUrl: string): Promise<numbe
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     const res = await fetch(url.toString(), { signal: controller.signal });
     clearTimeout(timeout);

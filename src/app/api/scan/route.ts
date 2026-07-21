@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
-import { searchPlaces, getPlaceDetails } from '@/lib/places';
+import { searchPlaces, getPlaceDetails, type PlaceSearchResult } from '@/lib/places';
 import { getMobilePagespeedScore } from '@/lib/pagespeed';
 import { checkDesignSignals } from '@/lib/design-check';
 import { scoreLead } from '@/lib/scoring';
@@ -10,8 +10,11 @@ import { ALL_COSTA_RICA, DEFAULT_RESULT_COUNT, MAX_ALLOWED_RESULTS, RESULT_COUNT
 import type { Lead, LeadStatus, ScanEvent, ScanSummary } from '@/lib/types';
 
 // This route can take a while: up to MAX_ALLOWED_RESULTS businesses, each
-// potentially requiring a PageSpeed Insights run (several seconds) plus a
-// Claude call. It streams NDJSON progress events as it goes so the UI can
+// potentially requiring a PageSpeed Insights run (real-world sites commonly
+// take 30-60+ seconds for a full mobile Lighthouse audit) plus a Claude
+// call. Businesses are processed with bounded concurrency (see CONCURRENCY
+// below) so the whole scan doesn't take (count × per-business time) — it
+// streams NDJSON progress events as each business finishes so the UI can
 // show real-time status instead of blocking on one long request.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +23,27 @@ export const dynamic = 'force-dynamic';
 // regardless of this value — if you're on Hobby, keep scans small
 // (few results) or move this route to a queue/background worker.
 export const maxDuration = 300;
+
+// How many businesses to process at once. PageSpeed audits are the
+// bottleneck (30-60s+ each for real sites) — without concurrency, a
+// maxResults=50 scan where most businesses have real websites could take
+// 25-50 minutes, which is unusable and risks exceeding maxDuration even on
+// Vercel Pro. Even with this, an unlucky scan (many slow real sites) can
+// still take a few minutes — that's the nature of running a real Lighthouse
+// audit per business rather than a background job queue.
+const CONCURRENCY = 8;
+
+async function runPool<T>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<void>) {
+  let nextIndex = 0;
+  const poolSize = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: poolSize }, async () => {
+    while (nextIndex < items.length) {
+      const current = nextIndex++;
+      await worker(items[current], current);
+    }
+  });
+  await Promise.all(workers);
+}
 
 export async function POST(req: NextRequest) {
   let category: string;
@@ -76,19 +100,13 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        send({ type: 'status', message: `Se encontraron ${places.length} negocios. Analizando uno por uno...` });
+        send({ type: 'status', message: `Se encontraron ${places.length} negocios. Analizando (hasta ${CONCURRENCY} a la vez)...` });
 
         const db = getDb();
+        let completed = 0;
 
-        for (let i = 0; i < places.length; i++) {
-          const place = places[i];
-
-          send({
-            type: 'progress',
-            index: i + 1,
-            total: places.length,
-            message: `(${i + 1}/${places.length}) Analizando "${place.name}"...`,
-          });
+        const processBusiness = async (place: PlaceSearchResult) => {
+          send({ type: 'status', message: `Analizando "${place.name}"...` });
 
           try {
             const details = await getPlaceDetails(place.placeId);
@@ -100,11 +118,14 @@ export async function POST(req: NextRequest) {
             let extractedEmail: string | null = null;
 
             if (hasWebsite && details.website) {
-              send({ type: 'status', message: `Revisando velocidad móvil de "${place.name}"...` });
-              pagespeedScore = await getMobilePagespeedScore(details.website);
-
-              send({ type: 'status', message: `Revisando señales de diseño de "${place.name}"...` });
-              const designResult = await checkDesignSignals(details.website);
+              send({ type: 'status', message: `Revisando velocidad y diseño de "${place.name}"...` });
+              // Independent checks against the same site — run concurrently
+              // rather than one after another to cut per-business latency.
+              const [scoreResult, designResult] = await Promise.all([
+                getMobilePagespeedScore(details.website),
+                checkDesignSignals(details.website),
+              ]);
+              pagespeedScore = scoreResult;
               designSignals = designResult.signals;
               designOutdated = designResult.outdated;
               extractedEmail = designResult.extractedEmail;
@@ -172,8 +193,20 @@ export async function POST(req: NextRequest) {
               type: 'error',
               message: `Error al procesar "${place.name}": ${perBusinessErr?.message ?? 'error desconocido'}`,
             });
+          } finally {
+            // Businesses finish out of order under concurrency, so progress
+            // is reported by completion count rather than start order.
+            completed++;
+            send({
+              type: 'progress',
+              index: completed,
+              total: places.length,
+              message: `(${completed}/${places.length}) completados`,
+            });
           }
-        }
+        };
+
+        await runPool(places, CONCURRENCY, processBusiness);
 
         send({ type: 'done', summary });
       } catch (err: any) {
