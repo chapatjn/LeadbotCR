@@ -29,8 +29,11 @@ export const CR_CATEGORIES = [
   'Contador',
 ] as const;
 
-export const RESULT_COUNT_OPTIONS = [5, 10, 20, 50] as const;
+export const RESULT_COUNT_OPTIONS = [5, 10, 20, 50, 100, 150] as const;
 export const DEFAULT_RESULT_COUNT = 20;
-// Server-side ceiling regardless of what a client sends — Google Places
-// Text Search caps out at 3 pages (~60 results) per query anyway.
-export const MAX_ALLOWED_RESULTS = 50;
+// Server-side ceiling regardless of what a client sends. A single Google
+// Places Text Search query caps out at 3 pages (~60 results), but
+// searchPlaces/searchPlacesWithoutWebsite now issue several query variants
+// (per-city for "Todo Costa Rica", per-phrasing for a single city) and
+// dedupe by placeId, so totals well above 60 are realistically reachable.
+export const MAX_ALLOWED_RESULTS = 150;

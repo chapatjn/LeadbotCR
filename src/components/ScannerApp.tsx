@@ -128,7 +128,10 @@ export function ScannerApp() {
         break;
       case 'done':
         setSummary(event.summary);
-        pushLog('Escaneo completo.', 'status');
+        pushLog(
+          `Escaneo completo: ${event.summary.total} encontrados de ${event.summary.requested} solicitados.`,
+          'status'
+        );
         break;
     }
   }
@@ -273,7 +276,7 @@ export function ScannerApp() {
           {isScanning && (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" />
           )}
-          {isScanning ? 'Escaneando...' : 'Buscar leads'}
+          {isScanning ? 'Escaneando...' : `Buscar ${resultsCount} leads`}
           {!isScanning && <span aria-hidden="true">↗</span>}
         </button>
             </div>
@@ -319,8 +322,9 @@ export function ScannerApp() {
       )}
 
       {summary && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <SummaryStat label="Total analizado" value={summary.total} />
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <SummaryStat label="Solicitados" value={summary.requested} />
+          <SummaryStat label="Encontrados" value={summary.total} />
           <SummaryStat label="Para revisar" value={summary.pendingReview} />
           <SummaryStat label="No calificados" value={summary.notQualified} />
         </section>

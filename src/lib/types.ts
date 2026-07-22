@@ -47,6 +47,7 @@ export interface LeadWithId extends Lead {
 }
 
 export interface ScanSummary {
+  requested: number;
   total: number;
   pendingReview: number;
   notQualified: number;
